@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User List</title>
+    <style>
+        h1 {
+            margin-top: 150px;
+            text-align: center;
+        }
+
+        ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        li {
+            border: 1px solid #ccc;
+            border-radius: 10px;
+            display: flex;
+            justify-content: space-between;
+            margin: 5px auto;
+            max-width: 300px;
+            height: 25px;
+            padding: 5px;
+        }
+
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+
+        button:hover {
+            background-color: #3a823e;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Connected Users</h1>
+    <ul id="userList"></ul>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const username = urlParams.get("username");
+
+        if (!username) {
+            alert("Username is required. Redirecting to home...");
+            window.location.href = "index.html";
+        }
+
+        let isCalling = false;
+        let currentCalleeId = null;
+        let notification = null;
+
+        socket.emit("registerUser", { username });
+
+        // Update user list dynamically
+        socket.on("updateUserList", ({ users }) => {
+            const userList = document.getElementById("userList");
+            userList.innerHTML = "";
+
+            users.forEach((user) => {
+                const listItem = document.createElement("li");
+                const userNameText = document.createTextNode(
+                    user.socketId === socket.id ? `${user.username} (You)` : user.username
+                );
+
+                listItem.appendChild(userNameText);
+
+                if (user.socketId !== socket.id) {
+                    const callButton = document.createElement("button");
+                    callButton.textContent = "Call";
+                    callButton.addEventListener("click", () => {
+                        if (isCalling) return; // Prevent multiple calls
+                        isCalling = true;
+                        currentCalleeId = user.socketId;
+
+                        socket.emit("callUser", { callerId: socket.id, calleeId: user.socketId });
+
+                        // Notification with cancel button
+                        showNotification(`Calling ${user.username}...`, "Cancel", () => {
+                            socket.emit("cancelCall", { calleeId: user.socketId });
+                            removeNotification();
+                            isCalling = false;
+                            currentCalleeId = null;
+                        });
+                    });
+                    listItem.appendChild(callButton);
+                }
+
+                userList.appendChild(listItem);
+            });
+        });
+
+        // Incoming call notification
+        socket.on("incomingCall", ({ callerId, callerName }) => {
+            showNotification(
+                `${callerName} is calling you.`,
+                "Accept",
+                () => {
+                    socket.emit("acceptCall", { callerId });
+                    removeNotification();
+                    window.location.href = `room.html?username=${encodeURIComponent(username)}&roomId=${callerId}`;
+                },
+                "Reject",
+                () => {
+                    socket.emit("rejectCall", { callerId });
+                    removeNotification();
+                }
+            );
+        });
+
+        socket.on("callAccepted", ({ roomId }) => {
+            removeNotification();
+            isCalling = false;
+            currentCalleeId = null;
+            window.location.href = `room.html?username=${encodeURIComponent(username)}&roomId=${roomId}`;
+        });
+
+        socket.on("callRejected", () => {
+            showNotification("The user has rejected your call.");
+            isCalling = false;
+            currentCalleeId = null;
+
+            setTimeout(() => {
+                removeNotification();
+            }, 2000);
+        });
+
+        // Handle call canceled by the caller
+        socket.on("callCanceled", () => {
+            removeNotification();
+        });
+
+        // Function to show notifications with one or two buttons
+        function showNotification(message, button1Text, button1Action, button2Text = null, button2Action = null) {
+            removeNotification(); // Ensure previous notification is removed
+
+            notification = document.createElement("div");
+            notification.id = "notification";
+            notification.style.cssText =
+                "position: fixed; top: 10px; left: 50%; transform: translateX(-50%); background-color: #333; color: white; padding: 15px; border-radius: 8px; z-index: 1000; text-align: center;";
+
+            const messageText = document.createElement("p");
+            messageText.textContent = message;
+            notification.appendChild(messageText);
+
+            const button1 = document.createElement("button");
+            button1.textContent = button1Text;
+            button1.style.cssText = "margin: 5px; padding: 5px 15px; background-color: green; color: white; border: none; cursor: pointer;";
+            button1.addEventListener("click", button1Action);
+            notification.appendChild(button1);
+
+            if (button2Text && button2Action) {
+                const button2 = document.createElement("button");
+                button2.textContent = button2Text;
+                button2.style.cssText = "margin: 5px; padding: 5px 15px; background-color: red; color: white; border: none; cursor: pointer;";
+                button2.addEventListener("click", button2Action);
+                notification.appendChild(button2);
+            }
+
+            document.body.appendChild(notification);
+        }
+
+        function removeNotification() {
+            if (notification) {
+                notification.remove();
+                notification = null;
+            }
+        }
+    </script>
+
+</body>
+
+</html>
